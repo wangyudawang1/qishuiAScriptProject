@@ -6,12 +6,19 @@
 #   filename    忽略指定文件名（精确匹配）
 #   path/to/x   忽略指定相对路径
 
-# ── IDE / 编辑器 ──
+# ── IDE / 编辑器与 AI 规则 ──
 .vscode/
 .idea/
+.trae/
+.github/
 .gradle/
 .scripts/
 *.iml
+
+# ── 测试与文档（无需同步到手机端 AScript 工程目录） ──
+tests/
+README.md
+__init___ios_backup.py
 
 # ── 版本控制 ──
 .git/
