@@ -18,6 +18,7 @@
 
 import os
 import re
+import sys
 import time
 import traceback
 
@@ -122,9 +123,14 @@ CLAIM_STEP2_KEYWORDS = (
 # ============== 工具函数 ==============
 
 def log(msg: str):
-    """统一日志打印"""
+    """统一日志打印（兼容 Windows 等非 UTF-8 控制台编码，永不抛出编码异常）"""
     ts = time.strftime("%H:%M:%S", time.localtime())
-    print(f"[{ts}] {msg}")
+    line = f"[{ts}] {msg}"
+    try:
+        print(line)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(line.encode(enc, errors="replace").decode(enc, errors="replace"))
 
 
 def _parse_rect(obj):

@@ -1,7 +1,7 @@
 # 汽水音乐 安卓自动化脚本
 
 [![Unit Tests CI](https://github.com/wangyudawang1/qishuiAScriptProject/actions/workflows/test.yml/badge.svg)](https://github.com/wangyudawang1/qishuiAScriptProject/actions/workflows/test.yml)
-[![Unit Tests](https://img.shields.io/badge/Tests-23%2F23%20ALL%20GREEN-brightgreen)](tests/test_qishui_android.py)
+[![Unit Tests](https://img.shields.io/badge/Tests-24%2F24%20ALL%20GREEN-brightgreen)](tests/test_qishui_android.py)
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Framework](https://img.shields.io/badge/framework-AScript-blue)
 ![Based on](https://img.shields.io/badge/based%20on-iOS%20version-orange)
@@ -33,7 +33,7 @@
 | **广告跳转前台防劫持** | 误触广告落地页跳转至应用商店或浏览器后脚本继续空等卡死 | 每 3 轮检测 `system.get_foreground_app()`，放行系统权限弹窗，一旦跳离立即拉回 `com.luna.music` |
 | **顶部伪装屏蔽 & 当日额度早退** | 不限区域找 `"领取成功"` 易误点底部广告正文；额度用尽后仍白跑 10 轮 | 严格限定 `y < 25%` 顶部栏，复用坐标直达步骤 2；检出 `"今日已领完/明日再来"` 等立即体面退出 |
 | **第 4+ 轮恢复断链修复** | 原 `idle_count <= 3` 限制导致连续失败第 4 轮起与重启 App 后再也不点「免」字 | 全周期 `idle_count` 每次均执行状态恢复、重启后必校验 `is_on_home_page()` 再精准点击「免」字 |
-| **工程规范与自动化测试 CI** | 无测试覆盖与跨平台 Git 配置，手机同步会带入无关文件 | 新增 23 组零真机依赖单元测试（[`tests/test_qishui_android.py`](tests/test_qishui_android.py)）与 **GitHub Actions 四矩阵 CI**，完善 `.syncignore` 与 `.gitattributes` |
+| **工程规范与自动化测试 CI** | 无测试覆盖与跨平台 Git 配置，手机同步会带入无关文件 | 新增 24 组零真机依赖单元测试（[`tests/test_qishui_android.py`](tests/test_qishui_android.py)）与 **GitHub Actions 四矩阵 CI**，完善 `.syncignore` 与 `.gitattributes` |
 
 ---
 
@@ -72,7 +72,7 @@ qishuiAScriptProject/
 ├── __init__.py                     # 安卓版主入口（AScript 工程约定，必须叫这个名字）
 ├── __init___ios_backup.py          # 原 iOS 版脚本完整备份
 ├── tests/
-│   └── test_qishui_android.py      # 23 组核心状态机与异常恢复单元测试（纯标准库）
+│   └── test_qishui_android.py      # 24 组核心状态机与异常恢复单元测试（纯标准库）
 ├── .github/workflows/
 │   └── test.yml                    # GitHub Actions 跨平台自动验证（Ubuntu + Windows × Python 3.10/3.12）
 ├── res/img/                        # 图标与模板图

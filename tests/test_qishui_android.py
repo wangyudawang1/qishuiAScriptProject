@@ -588,7 +588,15 @@ class TestQishuiAndroid(unittest.TestCase):
         # 5 次处于首页时点了免字，第 5 次（不在首页）拦截未盲点
         self.assertEqual(STUBS.clicks, [(mian_x, mian_y)] * 5)
 
-    # ---------- 9. AScript 入口契约校验 ----------
+    # ---------- 9. 控制台编码兼容 & AScript 入口契约校验 ----------
+
+    def test_log_handles_non_utf8_stdout_safely(self):
+        raw_buf = io.BytesIO()
+        cp1252_stream = io.TextIOWrapper(raw_buf, encoding="cp1252", errors="strict")
+        with redirect_stdout(cp1252_stream):
+            qishui.log("🎵 汽水音乐测试 ⚠️ ✅")
+            cp1252_stream.flush()
+        self.assertGreater(len(raw_buf.getvalue()), 0)
 
     def test_ascript_top_level_entry_contract(self):
         with open(MODULE_PATH, "r", encoding="utf-8") as f:
