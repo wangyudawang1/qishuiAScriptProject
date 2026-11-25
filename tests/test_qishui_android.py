@@ -66,6 +66,9 @@ class _StubRegistry:
     def reset(self):
         self.clicks = []
         self.backs = 0
+        self.homes = 0
+        self.shell_calls = []
+        self.toasts = []
         self.opened_packages = []
         self.foreground_app = "com.luna.music"
         self.display_size = (1080, 2400)
@@ -100,12 +103,18 @@ def _install_ascript_stubs():
         def back():
             STUBS.backs += 1
 
+        @staticmethod
+        def home():
+            STUBS.homes += 1
+
     action_mod.Key = _Key
     action_mod.click = lambda x, y: STUBS.clicks.append((x, y))
 
     system_mod = types.ModuleType("ascript.android.system")
     system_mod.open = lambda pkg: STUBS.opened_packages.append(pkg)
     system_mod.get_foreground_app = lambda: STUBS.foreground_app
+    system_mod.shell = lambda cmd: STUBS.shell_calls.append(cmd)
+    system_mod.toast = lambda msg: STUBS.toasts.append(msg)
 
     class _DisplayObj:
         @property
@@ -244,6 +253,13 @@ class TestQishuiAndroid(unittest.TestCase):
         qishui.FIRST_ROUND_TIMEOUT = 70
         qishui.AD_COUNTDOWN_TIMEOUT = 65
         qishui.MAX_AD_TIMEOUT = 95
+        qishui.COUNTDOWN_STALL_TIMEOUT = 15
+        qishui.TARGET_CLAIM_COUNT = 0
+        qishui.CLICK_JITTER_PX = 0
+        qishui.AUTO_TRY_MIAN_FALLBACK = False
+        qishui.ENABLE_COLD_RESTART_FALLBACK = False
+        qishui.MIAN_X_RATIO = 0.937
+        qishui.MIAN_Y_RATIO = 0.063
 
     # ---------- 1. _parse_rect / _node_bounds ----------
 
@@ -604,6 +620,151 @@ class TestQishuiAndroid(unittest.TestCase):
         self.assertNotIn('__name__ == "__main__"', src)
         self.assertNotIn("__name__ == '__main__'", src)
         self.assertIn('os.environ.get("QISHUI_TEST_MODE") != "1"', src)
+
+    # ---------- 10. v2.0.0 新增能力与 Issue #1 回归测试 ----------
+
+    def test_config_module_loaded_and_presets_defined(self):
+        self.assertIn("default_top_right", qishui.MIAN_PRESETS)
+        self.assertIn("huawei_play_side", qishui.MIAN_PRESETS)
+        self.assertEqual(qishui.MIAN_PRESETS["huawei_play_side"], (0.790, 0.814))
+
+    def test_is_on_home_page_rejects_ad_copy_false_positives(self):
+        # 广告正文中出现"发现更多好物"、"汽水音乐会员"不应被误判为首页
+        ad_texts = [
+            ("发现更多好物", 540, 1100),
+            ("汽水音乐会员", 540, 1400),
+            ("模式探索活动", 540, 1200),
+        ]
+        self.assertFalse(qishui.is_on_home_page(ad_texts))
+
+        # 底部导航栏精确命中"发现"才判定为首页
+        home_texts = [("发现", 180, 2300), ("音乐", 540, 2300)]
+        self.assertTrue(qishui.is_on_home_page(home_texts))
+
+    def test_safe_click_jitter_stays_within_delta_and_bounds(self):
+        qishui.CLICK_JITTER_PX = 5
+        bound = [100, 200, 110, 210]
+        with patch.object(qishui.time, "sleep"):
+            for _ in range(25):
+                self.assertTrue(qishui.safe_click(105, 205, "jitter", bound_rect=bound))
+                cx, cy = STUBS.clicks[-1]
+                self.assertGreaterEqual(cx, 100)
+                self.assertLessEqual(cx, 110)
+                self.assertGreaterEqual(cy, 200)
+                self.assertLessEqual(cy, 210)
+
+    def test_ocr_find_does_not_double_scan_when_rect_returns_none(self):
+        STUBS.ocr_find_handler = lambda text, rect=None, confidence=0.1: None
+        res = qishui.ocr_find("不存在的词", rect=[0, 0, 500, 500])
+        self.assertIsNone(res)
+        self.assertEqual(len(STUBS.ocr_find_calls), 1)
+
+    def test_enter_ad_from_home_falls_back_to_huawei_ratio_when_still_on_home(self):
+        qishui.AUTO_TRY_MIAN_FALLBACK = True
+        home_seq = iter([True, False])  # 点主入口后仍在首页 -> 点备选入口后离开首页
+        with patch.object(qishui, "is_on_home_page", lambda: next(home_seq)), patch.object(qishui.time, "sleep"):
+            ok = qishui.enter_ad_from_home(verify=True)
+        self.assertTrue(ok)
+        self.assertEqual(
+            STUBS.clicks,
+            [(int(1080 * 0.937), int(2400 * 0.063)), (int(1080 * 0.790), int(2400 * 0.814))],
+        )
+
+    def test_dismiss_popups_uses_back_key_instead_of_top_bar_click(self):
+        seq = iter([
+            _ocr_dicts(("开通会员享特权", 540, 1200)),  # 没有文字或 desc 关闭按钮
+            _ocr_dicts(("发现", 540, 2300)),
+        ])
+        STUBS.ocr_find_all_handler = lambda: next(seq)
+        with patch.object(qishui.time, "sleep"):
+            closed = qishui.dismiss_popups(max_rounds=2)
+        self.assertEqual(closed, 1)
+        self.assertEqual(STUBS.backs, 1)
+        self.assertEqual(STUBS.clicks, [])
+
+    def test_wait_ad_countdown_clicks_progress_unlock_and_ignores_title_text(self):
+        clock = _FakeClock()
+        frames = iter([
+            # 含"再看28秒继续解锁"标题 + 底部"解锁第4天畅听"按钮：绝不能误点含"秒/继续解锁"的标题
+            _ocr_dicts(
+                ("再看28秒继续解锁", 540, 1100),
+                ("再看2个提前享第4天畅听", 540, 950),
+                ("解锁第4天畅听", 540, 1550),
+            ),
+            _ocr_dicts(("领取成功", 960, 110)),
+        ])
+        STUBS.ocr_find_all_handler = lambda: next(frames)
+        stats = {"progress_unlocks": 0}
+        with patch.object(qishui.time, "time", clock.time), patch.object(qishui.time, "sleep", clock.sleep):
+            status, _ = qishui.wait_ad_countdown(timeout=30, stats=stats)
+        self.assertEqual(status, "ready")
+        self.assertEqual(stats["progress_unlocks"], 1)
+        self.assertEqual(STUBS.clicks, [(540, 1550)])
+
+    def test_claim_reward_clicks_huawei_unlock_button_variant(self):
+        STUBS.ocr_find_all_handler = lambda: _ocr_dicts(
+            ("再看1个视频解锁更多畅听", 540, 900),
+            ("立即解锁 第3天畅听", 540, 1400),
+        )
+        with patch.object(qishui.time, "sleep"):
+            res = qishui.claim_reward(reward_pos=(960, 120))
+        self.assertEqual(res, "claimed")
+        self.assertEqual(STUBS.clicks, [(960, 120), (540, 1400)])
+
+    def test_wait_ad_countdown_and_claim_reward_close_internal_landing_page_safely(self):
+        clock = _FakeClock()
+        # 1) wait_ad_countdown 遇到无倒计时/无继续观看的会员推销落地页 -> 关闭后继续等到领取成功
+        frames = iter([
+            _ocr_dicts(("汽水音乐会员", 540, 800), ("立即购买", 540, 1800), ("×", 990, 120)),
+            _ocr_dicts(("领取成功", 960, 110)),
+        ])
+        STUBS.ocr_find_all_handler = lambda: next(frames)
+        stats = {"landing_closed": 0}
+        with patch.object(qishui.time, "time", clock.time), patch.object(qishui.time, "sleep", clock.sleep):
+            status, _ = qishui.wait_ad_countdown(timeout=30, stats=stats)
+        self.assertEqual(status, "ready")
+        self.assertEqual(stats["landing_closed"], 1)
+        self.assertEqual(STUBS.clicks, [(990, 120)])
+
+        # 2) claim_reward 步骤1点击后落入 SVIP 落地页 -> 安全关闭并判定本轮已领取
+        STUBS.reset()
+        STUBS.ocr_find_all_handler = lambda: _ocr_dicts(("SVIP 首月特惠", 540, 900), ("立即购买", 540, 1900), ("X", 1000, 110))
+        with patch.object(qishui.time, "sleep"):
+            res = qishui.claim_reward(reward_pos=(960, 120))
+        self.assertEqual(res, "claimed")
+        self.assertEqual(STUBS.clicks, [(960, 120), (1000, 110)])
+
+    def test_wait_ad_countdown_aborts_early_on_frozen_countdown(self):
+        clock = _FakeClock(step=6.0)
+        qishui.COUNTDOWN_STALL_TIMEOUT = 15
+        STUBS.ocr_find_all_handler = lambda: _ocr_dicts(("15秒后可领取", 260, 110))
+        with patch.object(qishui.time, "time", clock.time), patch.object(qishui.time, "sleep", clock.sleep):
+            status, pos = qishui.wait_ad_countdown(timeout=65)
+        self.assertEqual((status, pos), ("timeout", None))
+        # 停滞在 15s 超过 15s 提前退出，绝不傻等到 65~95s
+        self.assertLess(clock.time() - 1000.0, 30.0)
+
+    def test_run_ad_loop_stops_when_target_claim_count_reached(self):
+        qishui.TARGET_CLAIM_COUNT = 2
+        qishui.MAX_LOOP_COUNT = 10
+        with patch.object(qishui, "wait_ad_countdown", lambda timeout=65, stats=None: ("ready", (960, 120))), \
+             patch.object(qishui, "claim_reward", lambda reward_pos=None: "claimed"), \
+             patch.object(qishui.time, "sleep"):
+            total = qishui.run_ad_loop()
+        self.assertEqual(total, 2)
+
+    def test_restart_app_sends_home_before_reopening(self):
+        qishui.ENABLE_COLD_RESTART_FALLBACK = True
+        stats = {"restarts": 0}
+        with patch.object(qishui, "skip_splash_ad", lambda timeout=4: False), \
+             patch.object(qishui, "dismiss_popups", lambda max_rounds=2: 0), \
+             patch.object(qishui.time, "sleep"):
+            ok = qishui.restart_app(stats=stats)
+        self.assertTrue(ok)
+        self.assertEqual(STUBS.homes, 1)
+        self.assertEqual(STUBS.shell_calls, [f"am force-stop {qishui.APP_PACKAGE}"])
+        self.assertEqual(STUBS.opened_packages, [qishui.APP_PACKAGE])
+        self.assertEqual(stats["restarts"], 1)
 
 
 if __name__ == "__main__":

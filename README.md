@@ -1,7 +1,8 @@
 # 汽水音乐 安卓自动化脚本
 
 [![Unit Tests CI](https://github.com/wangyudawang1/qishuiAScriptProject/actions/workflows/test.yml/badge.svg)](https://github.com/wangyudawang1/qishuiAScriptProject/actions/workflows/test.yml)
-[![Unit Tests](https://img.shields.io/badge/Tests-24%2F24%20ALL%20GREEN-brightgreen)](tests/test_qishui_android.py)
+[![Release](https://img.shields.io/github/v/release/wangyudawang1/qishuiAScriptProject?display_name=tag)](https://github.com/wangyudawang1/qishuiAScriptProject/releases)
+[![Unit Tests](https://img.shields.io/badge/Tests-36%2F36%20ALL%20GREEN-brightgreen)](tests/test_qishui_android.py)
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Framework](https://img.shields.io/badge/framework-AScript-blue)
 ![Based on](https://img.shields.io/badge/based%20on-iOS%20version-orange)
@@ -27,13 +28,11 @@
 | 优化项 | 原实现隐患 | 现改进方案与收益 |
 | :--- | :--- | :--- |
 | **AScript `Selector` + `Rect` 修复** | 仅尝试 `.left/.top`（遗漏 AScript 原生 `Rect.x1/y1/x2/y2`），未绑定 `mode=2`，且控件查找未校 `rect` 边界 | 新增 `_parse_rect()` 兼容 `x1/y1/x2/y2` 与 `left/top/right/bottom`，绑定 `SELECTOR_MODE = 2`，强制 `_in_rect()` 校验并支持 `find_all()` |
-| **弹窗清理单次扫描提速 14×** | `dismiss_popups()` 每轮对 14 个关键词逐个调用 `Ocr.find()`，耗时高达 5~11 秒 | 改为每轮单次 `scan_screen_texts()` + 内存关键词匹配，**提速约 14 倍**；无文字叉号支持控件 `desc("关闭")` 兜底 |
-| **动态倒计时 & 65s+ 长广告支持** | 默认超时仅 30 秒且只解析个位数字，`45s~60s` 视频广告在中途直接误判超时 | 默认超时升级至 `AD_COUNTDOWN_TIMEOUT = 65`（首轮 `70s`），支持完整多位倒计时正则解析与动态顺延（上限 `95s`） |
-| **直播诱导 vs 短剧挽留精准防误触** | `LIVE_PROMPT_HINTS` 含泛化的 `"是否继续"`，短剧弹窗出现 `"坚持退出"` 时会误判导致放弃奖励 | 精准拆分 `_is_short_drama_retention()` 与 `_is_live_prompt()`，并在退出词中强排除 `"坚持/放弃"`，绝不误点 `"坚持退出"` |
-| **广告跳转前台防劫持** | 误触广告落地页跳转至应用商店或浏览器后脚本继续空等卡死 | 每 3 轮检测 `system.get_foreground_app()`，放行系统权限弹窗，一旦跳离立即拉回 `com.luna.music` |
-| **顶部伪装屏蔽 & 当日额度早退** | 不限区域找 `"领取成功"` 易误点底部广告正文；额度用尽后仍白跑 10 轮 | 严格限定 `y < 25%` 顶部栏，复用坐标直达步骤 2；检出 `"今日已领完/明日再来"` 等立即体面退出 |
-| **第 4+ 轮恢复断链修复** | 原 `idle_count <= 3` 限制导致连续失败第 4 轮起与重启 App 后再也不点「免」字 | 全周期 `idle_count` 每次均执行状态恢复、重启后必校验 `is_on_home_page()` 再精准点击「免」字 |
-| **工程规范与自动化测试 CI** | 无测试覆盖与跨平台 Git 配置，手机同步会带入无关文件 | 新增 24 组零真机依赖单元测试（[`tests/test_qishui_android.py`](tests/test_qishui_android.py)）与 **GitHub Actions 四矩阵 CI**，完善 `.syncignore` 与 `.gitattributes` |
+| **弹窗清理单次扫描提速 14× + 安全返回** | `dismiss_popups()` 每轮逐词 OCR 耗时 5~11 秒；找不到关闭按钮时盲点 `y=8%` 易误触顶部搜索栏 | 改为每轮单次 `scan_screen_texts()` + 内存匹配；兜底改用 `action.Key.back()`；`ocr_find(rect=...)` 消除无谓双倍全屏 OCR |
+| **多机型入口预设 & 进度弹窗/落地页兼容** | 写死右上角单坐标，华为等机型播放页右侧入口点不到；缺少「解锁第N天畅听」与会员推销落地页关闭逻辑 | 配置抽离至 [`config.py`](config.py)，内置 `default_top_right` 与 `huawei_play_side` 预设 + 自动回退探测；精准处理进度解锁弹窗与 App 内落地页 |
+| **精准首页校验 & 倒计时卡死早退** | 首页全屏子串匹配易被广告文案「发现好物」误触发；视频缓冲冻结会死等满 95 秒 | 顶部/底部区域分离 + 底部标签精确匹配；同一倒计时秒数停滞 ≥ 15 秒提前结束并重启恢复（`Home` 键打断 + 可选冷重启） |
+| **防机械点击微抖动 & 目标次数控制** | 固定像素坐标连点；无领满 N 次自动停止与结束提示 | 新增 `CLICK_JITTER_PX`（边界内 ±4px 微抖动）、`TARGET_CLAIM_COUNT` 与可选 `Toast` 统计汇总 |
+| **工程规范、测试 CI 与手机端直装包** | 测试覆盖不足且无开箱即用手机包 | 扩充至 **36 组零真机依赖单元测试**（[`tests/test_qishui_android.py`](tests/test_qishui_android.py)）、4 矩阵 CI，并在 [Releases](https://github.com/wangyudawang1/qishuiAScriptProject/releases) 提供纯净手机端 `.zip` |
 
 ---
 
@@ -69,13 +68,17 @@ flowchart TD
 
 ```text
 qishuiAScriptProject/
-├── __init__.py                     # 安卓版主入口（AScript 工程约定，必须叫这个名字）
+├── __init__.py                     # 安卓版主入口与核心状态机（AScript 工程约定文件名）
+├── config.py                       # 独立用户配置（预设坐标、超时、抖动、目标次数等）
 ├── __init___ios_backup.py          # 原 iOS 版脚本完整备份
 ├── tests/
-│   └── test_qishui_android.py      # 24 组核心状态机与异常恢复单元测试（纯标准库）
-├── .github/workflows/
-│   └── test.yml                    # GitHub Actions 跨平台自动验证（Ubuntu + Windows × Python 3.10/3.12）
-├── res/img/                        # 图标与模板图
+│   └── test_qishui_android.py      # 36 组核心状态机与回归单元测试（纯标准库）
+├── .github/
+│   ├── workflows/
+│   │   ├── test.yml                # GitHub Actions 4 矩阵 CI
+│   │   └── release.yml             # Tag 发布自动打包纯净手机端 .zip
+│   └── ISSUE_TEMPLATE/             # Bug 反馈与机型坐标分享模板
+├── res/img/                        # 工程图标与模板图
 ├── .vscode/
 │   ├── settings.json               # 平台 / 设备地址 / Python 路径
 │   └── .syncignore                 # 手机端同步排除规则（自动排除 tests/、.github/、文档等）
@@ -84,6 +87,8 @@ qishuiAScriptProject/
 ```
 
 ## 快速开始
+
+> 💡 **免电脑 / 纯手机用户**：可直接前往 [Releases](https://github.com/wangyudawang1/qishuiAScriptProject/releases) 下载 `qishuiAScriptProject-v*.zip` 纯净工程包，解压导入 AScript App 即可使用。
 
 ### 1. 手机端
 
@@ -105,7 +110,7 @@ qishuiAScriptProject/
 - **运行工程**：在 VS Code 里用 AScript 插件运行工程，或让 AI 调用 `run_project`。
 - **本地运行全部单元测试（零真机依赖）**：
   ```bash
-  python -m py_compile __init__.py tests/test_qishui_android.py
+  python -m py_compile config.py __init__.py tests/test_qishui_android.py
   python -m unittest discover -s tests -v
   ```
 
@@ -150,26 +155,40 @@ AScript 没有内置定时任务，用手机系统自带的能力：
 - **vivo**：设置 → 快捷与辅助 → 自动任务 → 新建（定时启动指定应用）
 - **第三方**：Tasker / MacroDroid 定时启动 AScript 并运行工程
 
-## 关键配置
+## 关键配置（[`config.py`](config.py)）
 
-打开 `__init__.py` 头部：
+所有可调参数已抽离至 [`config.py`](config.py)，升级主脚本不会覆盖你的个人配置：
 
 | 常量 | 默认值 | 说明 |
 |------|--------|------|
 | `APP_PACKAGE` | `"com.luna.music"` | 安卓版汽水音乐包名 |
+| `MIAN_PRESET` | `"default_top_right"` | 入口坐标预设：`"default_top_right"` `(0.937, 0.063)` 或 `"huawei_play_side"` `(0.790, 0.814)` |
+| `MIAN_X_RATIO` / `MIAN_Y_RATIO` | `None` | 手动微调相对比例；设为小数时优先覆盖预设 |
+| `AUTO_TRY_MIAN_FALLBACK` | `True` | 主坐标点击后若仍在首页，自动尝试备选入口坐标 |
 | `AUTO_CLICK_MIAN` | `True` | 是否自动点「免」字（`False` = 半自动，由你手动点第一次） |
 | `SELECTOR_MODE` | `2` | 无障碍控件检索模式（`2=FILTERED_SIMPLE`，root 设备改 `9`，HID 改 `6`） |
+| `TARGET_CLAIM_COUNT` | `0` | 目标领取次数（`0` = 不限次数，领满或空跑达上限退出） |
 | `FIRST_ROUND_TIMEOUT` | `70` | 首轮等待广告结束超时（秒） |
 | `AD_COUNTDOWN_TIMEOUT` | `65` | 单轮广告默认等待超时（秒，覆盖 30s~60s 长广告） |
 | `MAX_AD_TIMEOUT` | `95` | 动态倒计时延长上限（秒） |
+| `COUNTDOWN_STALL_TIMEOUT` | `15` | 倒计时数字停滞超时（秒，超时提前结束本轮；`0` 关闭） |
+| `CLICK_JITTER_PX` | `4` | 防机械点击随机微抖动半径（像素；`0` 关闭） |
 | `KEEP_SCREEN_ON` | `True` | 屏幕常亮，防息屏中断 |
 | `AUTO_RESTART_APP` | `True` | 连续失败达到 3 的倍数轮次时自动重启 App 恢复 |
-| `MIAN_X_RATIO` | `0.937` | 「免」字按钮相对屏幕 X 位置 |
-| `MIAN_Y_RATIO` | `0.063` | 「免」字按钮相对屏幕 Y 位置 |
+| `ENABLE_COLD_RESTART_FALLBACK` | `False` | 重启恢复时是否通过 shell 执行 `am force-stop`（Root/Shizuku 适用） |
 | `OCR_ENGINE` | `"paddle"` | OCR 引擎（仅支持 `"paddle"` / `"mlkit"`） |
 | `LOOP_INTERVAL` | `3` | 每轮间隔秒数 |
 | `MAX_LOOP_COUNT` | `100` | 最大循环次数（约 40 分钟） |
 | `MAX_IDLE_ROUNDS` | `10` | 连续空跑退出阈值（若识别到今日领完文案则立即提前退出） |
+
+### 已实测机型坐标预设表
+
+| 预设名 / 机型 | 分辨率 | 入口位置 | 比例坐标 `(X, Y)` | 贡献者 |
+| :--- | :--- | :--- | :--- | :--- |
+| `default_top_right`（vivo V2055A 等） | `1080×2400` | 首页右上角「免」字 | `(0.937, 0.063)` | [@wangyudawang1](https://github.com/wangyudawang1) |
+| `huawei_play_side`（华为 Mate40 Pro 鸿蒙） | `1152×2376` | 播放页点赞行右侧 | `(0.790, 0.814)` | [@mengsen182](https://github.com/mengsen182) (Issue #1) |
+
+> 欢迎通过 [Device Profile 模板](.github/ISSUE_TEMPLATE/device_profile.yml) 提交更多机型的实测比例！
 
 ## 与 iOS 版的主要差异
 

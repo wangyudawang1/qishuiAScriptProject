@@ -1,0 +1,37 @@
+name: 问题反馈 (Bug Report)
+description: 反馈脚本识别异常、弹窗卡死或机型兼容性问题
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: input
+    id: device
+    attributes:
+      label: 手机品牌 / 型号 / 系统版本
+      placeholder: "例如：vivo V2055A / Android 14 / 1080x2400"
+    validations:
+      required: true
+  - type: input
+    id: app_versions
+    attributes:
+      label: 汽水音乐版本 & AScript 版本
+      placeholder: "例如：汽水音乐 12.x / AScript 4.0.17"
+    validations:
+      required: true
+  - type: dropdown
+    id: run_mode
+    attributes:
+      label: AScript 运行模式 & OCR 引擎
+      options:
+        - 无障碍模式 + paddle
+        - 无障碍模式 + mlkit
+        - Root 模式 + paddle
+        - HID 模式 + paddle
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 运行日志或报错现象
+      placeholder: 请粘贴关键运行日志，并说明卡在哪个阶段（开屏 / 首页点免字 / 广告倒计时 / 领奖）
+    validations:
+      required: true

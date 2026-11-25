@@ -1,0 +1,26 @@
+name: 机型适配坐标分享 (Device Profile)
+description: 提交已实测可用的机型分辨率与「免」字入口比例坐标，帮助完善预设列表
+title: "[Device]: "
+labels: ["device-profile"]
+body:
+  - type: input
+    id: device_model
+    attributes:
+      label: 手机型号 / 系统 / 屏幕分辨率
+      placeholder: "例如：华为 Mate40 Pro / HarmonyOS 4 / 1152x2376"
+    validations:
+      required: true
+  - type: input
+    id: ratios
+    attributes:
+      label: 实测「免」字入口比例坐标 (MIAN_X_RATIO, MIAN_Y_RATIO)
+      placeholder: "例如：0.790, 0.814（并注明位于右上角还是播放页右侧）"
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: 补充说明（特殊弹窗、按钮文案变体等）
+      placeholder: "例如：领奖按钮文字为『立即解锁 第3天畅听』"
+    validations:
+      required: false

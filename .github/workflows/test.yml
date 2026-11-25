@@ -26,7 +26,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Syntax check
-        run: python -m py_compile __init__.py tests/test_qishui_android.py
+        run: python -m py_compile config.py __init__.py tests/test_qishui_android.py
 
       - name: Run unit tests
         env:

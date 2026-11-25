@@ -1,0 +1,52 @@
+name: Release Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Test & Publish Phone-Ready Zip
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run unit tests
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          python -m py_compile config.py __init__.py tests/test_qishui_android.py
+          python -m unittest discover -s tests -v
+
+      - name: Build clean AScript phone-ready archive
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          PKG_DIR="qishuiAScriptProject"
+          mkdir -p "dist/${PKG_DIR}"
+          cp __init__.py config.py "dist/${PKG_DIR}/"
+          cp -r res "dist/${PKG_DIR}/"
+          (cd dist && zip -r "../qishuiAScriptProject-${TAG}.zip" "${PKG_DIR}")
+          ls -lh "qishuiAScriptProject-${TAG}.zip"
+
+      - name: Attach archive to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ZIP="qishuiAScriptProject-${TAG}.zip"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${ZIP}" --clobber
+          else
+            gh release create "${TAG}" "${ZIP}" --title "${TAG}" --generate-notes
+          fi

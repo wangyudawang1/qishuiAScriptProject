@@ -16,7 +16,9 @@
   → 点「领取成功」→ 点「领取奖励」→ 自动进下一轮 → 循环（领满自动退出）
 """
 
+import importlib.util
 import os
+import random
 import re
 import sys
 import time
@@ -29,37 +31,106 @@ from ascript.android.screen import Ocr  # type: ignore
 from ascript.android.node import Selector  # type: ignore
 
 
-# ============== 全局配置 ==============
+# ============== 全局配置（优先加载 config.py，缺省时使用内置默认值） ==============
 
-APP_NAME = "汽水音乐"
-APP_PACKAGE = "com.luna.music"      # 安卓版包名（iOS 是 com.soda.music）
+_DEFAULT_CONFIG = {
+    "APP_NAME": "汽水音乐",
+    "APP_PACKAGE": "com.luna.music",
+    "MAX_LOOP_COUNT": 100,
+    "TARGET_CLAIM_COUNT": 0,
+    "LOOP_INTERVAL": 3,
+    "MAX_IDLE_ROUNDS": 10,
+    "FIRST_ROUND_TIMEOUT": 70,
+    "AD_COUNTDOWN_TIMEOUT": 65,
+    "MAX_AD_TIMEOUT": 95,
+    "COUNTDOWN_STALL_TIMEOUT": 15,
+    "SELECTOR_MODE": 2,
+    "KEEP_SCREEN_ON": True,
+    "AUTO_RESTART_APP": True,
+    "ENABLE_COLD_RESTART_FALLBACK": False,
+    "SHOW_SUMMARY_TOAST": True,
+    "OCR_ENGINE": "paddle",
+    "CLICK_JITTER_PX": 4,
+    "MIAN_PRESETS": {
+        "default_top_right": (0.937, 0.063),
+        "huawei_play_side": (0.790, 0.814),
+    },
+    "MIAN_PRESET": "default_top_right",
+    "MIAN_X_RATIO": None,
+    "MIAN_Y_RATIO": None,
+    "MIAN_FALLBACK_RATIOS": ((0.790, 0.814),),
+    "AUTO_TRY_MIAN_FALLBACK": True,
+    "AUTO_CLICK_MIAN": True,
+}
 
-# 主循环控制
-MAX_LOOP_COUNT = 100                # 最大循环次数（防死循环）
-LOOP_INTERVAL = 3                   # 每轮间隔秒数
-MAX_IDLE_ROUNDS = 10                # 连续多少轮没领到就退出（当日额度用完）
-FIRST_ROUND_TIMEOUT = 70            # 首轮等待广告结束超时（秒，给用户充足准备时间）
-AD_COUNTDOWN_TIMEOUT = 65           # 单轮广告默认等待超时（秒，覆盖 30s~60s 长视频广告）
-MAX_AD_TIMEOUT = 95                 # 动态倒计时延长上限（秒，防止死等）
 
-# 无障碍控件检索模式（详见 .trae/rules/ascript.md §3.1：2=FILTERED_SIMPLE，root=9，hid=6）
-SELECTOR_MODE = 2
+def _load_user_config():
+    """加载同目录 config.py，兼容 AScript 包运行与单元测试直接加载两种场景。"""
+    cfg_mod = None
+    if __package__:
+        try:
+            from . import config as _pkg_cfg  # type: ignore
+            cfg_mod = _pkg_cfg
+        except Exception:
+            cfg_mod = None
+    if cfg_mod is None:
+        cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+        if os.path.isfile(cfg_path):
+            try:
+                spec = importlib.util.spec_from_file_location("qishui_user_config", cfg_path)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    cfg_mod = mod
+            except Exception:
+                cfg_mod = None
 
-# 无人值守相关
-KEEP_SCREEN_ON = True               # 保持屏幕常亮，防止息屏中断
-AUTO_RESTART_APP = True             # 连续失败时自动重启 App
+    resolved = {}
+    for key, default_val in _DEFAULT_CONFIG.items():
+        if cfg_mod is not None and hasattr(cfg_mod, key):
+            resolved[key] = getattr(cfg_mod, key)
+        else:
+            resolved[key] = default_val
 
-# OCR 引擎：paddle=百度 PP-OCR V5（准） / mlkit=谷歌（快）
-OCR_ENGINE = "paddle"
+    presets = resolved["MIAN_PRESETS"] or _DEFAULT_CONFIG["MIAN_PRESETS"]
+    preset_name = resolved["MIAN_PRESET"]
+    px, py = presets.get(preset_name, (0.937, 0.063))
+    if resolved["MIAN_X_RATIO"] is None:
+        resolved["MIAN_X_RATIO"] = float(px)
+    if resolved["MIAN_Y_RATIO"] is None:
+        resolved["MIAN_Y_RATIO"] = float(py)
+    return resolved
 
-# "免"字按钮相对屏幕位置（实测 vivo V2055A 1080x2400：约 1012, 151）
-MIAN_X_RATIO = 0.937
-MIAN_Y_RATIO = 0.063
 
-# 是否自动点"免"字进入广告
-# True  = 全自动（脚本自己点，每轮都自动进广告）
-# False = 半自动（你自己点第一次，之后脚本接管）
-AUTO_CLICK_MIAN = True
+_CFG = _load_user_config()
+
+APP_NAME = _CFG["APP_NAME"]
+APP_PACKAGE = _CFG["APP_PACKAGE"]
+
+MAX_LOOP_COUNT = _CFG["MAX_LOOP_COUNT"]
+TARGET_CLAIM_COUNT = _CFG["TARGET_CLAIM_COUNT"]
+LOOP_INTERVAL = _CFG["LOOP_INTERVAL"]
+MAX_IDLE_ROUNDS = _CFG["MAX_IDLE_ROUNDS"]
+FIRST_ROUND_TIMEOUT = _CFG["FIRST_ROUND_TIMEOUT"]
+AD_COUNTDOWN_TIMEOUT = _CFG["AD_COUNTDOWN_TIMEOUT"]
+MAX_AD_TIMEOUT = _CFG["MAX_AD_TIMEOUT"]
+COUNTDOWN_STALL_TIMEOUT = _CFG["COUNTDOWN_STALL_TIMEOUT"]
+
+SELECTOR_MODE = _CFG["SELECTOR_MODE"]
+KEEP_SCREEN_ON = _CFG["KEEP_SCREEN_ON"]
+AUTO_RESTART_APP = _CFG["AUTO_RESTART_APP"]
+ENABLE_COLD_RESTART_FALLBACK = _CFG["ENABLE_COLD_RESTART_FALLBACK"]
+SHOW_SUMMARY_TOAST = _CFG["SHOW_SUMMARY_TOAST"]
+OCR_ENGINE = _CFG["OCR_ENGINE"]
+CLICK_JITTER_PX = _CFG["CLICK_JITTER_PX"]
+
+MIAN_PRESETS = _CFG["MIAN_PRESETS"]
+MIAN_PRESET = _CFG["MIAN_PRESET"]
+MIAN_X_RATIO = _CFG["MIAN_X_RATIO"]
+MIAN_Y_RATIO = _CFG["MIAN_Y_RATIO"]
+MIAN_FALLBACK_RATIOS = _CFG["MIAN_FALLBACK_RATIOS"]
+AUTO_TRY_MIAN_FALLBACK = _CFG["AUTO_TRY_MIAN_FALLBACK"]
+AUTO_CLICK_MIAN = _CFG["AUTO_CLICK_MIAN"]
 
 # 运行时全局
 SCREEN_W = 1080
@@ -76,7 +147,9 @@ SAFE_SYSTEM_PACKAGES = (
     "android",
 )
 
-# 首页特征锚点
+# 首页特征锚点（顶部探索标签 + 底部导航精确标签，避免被广告正文子串误触发）
+HOME_TOP_ANCHORS = ("模式探索",)
+HOME_BOTTOM_TABS = ("发现", "音乐", "我的")
 HOME_ANCHOR_KEYWORDS = ("模式探索", "发现", "音乐")
 
 # 开屏跳过关键词
@@ -112,6 +185,11 @@ LIVE_EXIT_BUTTONS = (
 )
 LIVE_ROOM_HINTS = (
     "更多直播", "说点什么", "在线观众", "直播间人数",
+)
+
+# App 内广告落地页（会员推销页等）特征：仅在无倒计时且无继续观看时关闭
+AD_LANDING_HINTS = (
+    "立即购买", "SVIP", "汽水音乐会员",
 )
 
 # 奖励领取第二步确认按钮
@@ -235,8 +313,8 @@ def get_screen_size():
     return SCREEN_W, SCREEN_H
 
 
-def safe_click(x, y, desc="", sleep_after=0.6) -> bool:
-    """安全点击：边界校验 + 边缘钳位 + 日志 + 异常捕获"""
+def safe_click(x, y, desc="", sleep_after=0.6, jitter=None, bound_rect=None) -> bool:
+    """安全点击：边界校验 + 边缘钳位 + 可选防机械点击微抖动 + 日志 + 异常捕获"""
     try:
         ix = int(x)
         iy = int(y)
@@ -247,6 +325,17 @@ def safe_click(x, y, desc="", sleep_after=0.6) -> bool:
             ix = SCREEN_W - 1
         if iy == SCREEN_H and SCREEN_H > 0:
             iy = SCREEN_H - 1
+
+        j = CLICK_JITTER_PX if jitter is None else int(jitter)
+        if j > 0 and SCREEN_W > 1 and SCREEN_H > 1:
+            ix += random.randint(-j, j)
+            iy += random.randint(-j, j)
+            if bound_rect and len(bound_rect) == 4:
+                ix = max(int(bound_rect[0]), min(int(bound_rect[2]), ix))
+                iy = max(int(bound_rect[1]), min(int(bound_rect[3]), iy))
+            ix = max(0, min(SCREEN_W - 1, ix))
+            iy = max(0, min(SCREEN_H - 1, iy))
+
         log(f"点击 [{desc}] -> ({ix}, {iy})")
         action.click(ix, iy)
         if sleep_after > 0:
@@ -330,13 +419,13 @@ def ocr_find(text, rect=None, confidence=0.1):
     """
     查找文字，返回 dict 或 None。
     1) 先试控件树 Selector（严格遵守 rect 过滤）
-    2) 再试 OCR 带 rect 参数（返回兼容 dict 与 OcrText，二次校验坐标范围）
-    3) 兜底：OCR 全屏查找 + 手动按 rect 坐标过滤
+    2) 再试 OCR 带 rect 参数（仅当该调用抛异常或后端忽略 rect 返回区外坐标时才回退全屏 OCR，避免双倍耗时）
     """
     sel_hit = _selector_find(text, rect=rect, by="text")
     if sel_hit:
         return sel_hit
 
+    need_full_fallback = rect is None
     if rect:
         try:
             r = Ocr.find(text, rect=rect, confidence=confidence)
@@ -346,8 +435,15 @@ def ocr_find(text, rect=None, confidence=0.1):
                 if _in_rect(cx, cy, rect):
                     return {"text": txt, "center_x": cx, "center_y": cy,
                             "confidence": confidence, "source": "ocr"}
+                # 后端忽略了 rect 返回了区外坐标 → 触发全屏兜底以寻找区外/区内候选
+                need_full_fallback = True
+            elif r is not None:
+                need_full_fallback = True
         except Exception:
-            pass
+            need_full_fallback = True
+
+    if not need_full_fallback:
+        return None
 
     try:
         r = Ocr.find(text, confidence=confidence)
@@ -460,15 +556,46 @@ def launch_app() -> bool:
         return False
 
 
-def click_mian_button() -> bool:
+def click_mian_button(x_ratio=None, y_ratio=None, label="免字按钮") -> bool:
     """
-    点击右上角"免"字按钮。
-    实测该按钮是图片（无 text/desc 属性），OCR 也识别不出，只能用比例坐标。
+    点击「免」字按钮（默认使用 MIAN_X_RATIO / MIAN_Y_RATIO）。
+    实测该按钮为图片/图标（无 text/desc 属性），OCR 识别不稳定，采用屏幕比例坐标。
     """
-    x = int(SCREEN_W * MIAN_X_RATIO)
-    y = int(SCREEN_H * MIAN_Y_RATIO)
-    log(f"点击'免'字按钮（比例坐标）-> ({x}, {y})")
-    return safe_click(x, y, "免字按钮")
+    rx = MIAN_X_RATIO if x_ratio is None else float(x_ratio)
+    ry = MIAN_Y_RATIO if y_ratio is None else float(y_ratio)
+    x = int(SCREEN_W * rx)
+    y = int(SCREEN_H * ry)
+    log(f"点击'{label}'（比例坐标 {rx:.3f}, {ry:.3f}）-> ({x}, {y})")
+    return safe_click(x, y, label)
+
+
+def enter_ad_from_home(verify=True) -> bool:
+    """
+    从首页进入广告：先点击主入口坐标；若开启多位置自动回退且点击后仍停留在首页，
+    依次尝试 MIAN_FALLBACK_RATIOS（如华为播放页右侧入口），直到成功离开首页。
+    """
+    if not click_mian_button():
+        return False
+    if not verify or not AUTO_TRY_MIAN_FALLBACK or not MIAN_FALLBACK_RATIOS:
+        return True
+
+    time.sleep(1.8)
+    if not is_on_home_page():
+        return True
+
+    for idx, pair in enumerate(MIAN_FALLBACK_RATIOS, start=1):
+        if not pair or len(pair) != 2:
+            continue
+        fx, fy = float(pair[0]), float(pair[1])
+        if abs(fx - float(MIAN_X_RATIO)) <= 0.02 and abs(fy - float(MIAN_Y_RATIO)) <= 0.02:
+            continue
+        log(f"  ⚠️ 主入口点击后仍在首页，尝试备选入口 #{idx} ({fx:.3f}, {fy:.3f})")
+        click_mian_button(x_ratio=fx, y_ratio=fy, label=f"备选免字入口#{idx}")
+        time.sleep(1.8)
+        if not is_on_home_page():
+            log(f"  💡 备选入口 ({fx:.3f}, {fy:.3f}) 已生效！建议将 config.py 改为对应预设。")
+            return True
+    return False
 
 
 # ============== 阶段二：开屏广告 & 弹窗清理 ==============
@@ -544,9 +671,13 @@ def dismiss_popups(max_rounds=3) -> int:
                 time.sleep(1.0)
                 continue
 
-        log("  未找到关闭按钮，尝试点击屏幕上方空白区")
-        safe_click(SCREEN_W // 2, int(SCREEN_H * 0.08), "空白区")
-        closed += 1
+        log("  未找到关闭按钮，按返回键兜底关闭弹窗")
+        try:
+            action.Key.back()
+            closed += 1
+        except Exception as e:
+            log(f"  返回键关闭弹窗异常: {e}")
+            break
         time.sleep(1.0)
     log(f"  弹窗清理完成，共处理 {closed} 个")
     return closed
@@ -555,13 +686,30 @@ def dismiss_popups(max_rounds=3) -> int:
 # ============== 首页状态判断与恢复 ==============
 
 def is_on_home_page(texts=None) -> bool:
-    """判断当前是否停留在汽水音乐首页（支持复用已有 scan_screen_texts 结果）"""
-    for kw in HOME_ANCHOR_KEYWORDS:
-        if _selector_find(kw, by="text"):
+    """
+    判断当前是否停留在汽水音乐首页（支持复用已有 scan_screen_texts 结果）。
+    严防广告正文里的「发现好物」「汽水音乐」误判：
+      - 顶部栏 (y < 25%) 匹配 HOME_TOP_ANCHORS（如「模式探索」）
+      - 底部导航栏 (y > 84%) 精确匹配短标签 HOME_BOTTOM_TABS（如「发现」「音乐」「我的」）
+    """
+    top_rect = [0, 0, SCREEN_W, int(SCREEN_H * 0.25)]
+    bottom_rect = [0, int(SCREEN_H * 0.84), SCREEN_W, SCREEN_H]
+
+    for kw in HOME_TOP_ANCHORS:
+        if _selector_find(kw, rect=top_rect, by="text"):
             return True
+    for kw in ("发现", "音乐"):
+        if _selector_find(kw, rect=bottom_rect, by="text"):
+            return True
+
     if texts is None:
         texts = scan_screen_texts()
-    return _find_in_texts(texts, HOME_ANCHOR_KEYWORDS) is not None
+    if _find_in_texts(texts, HOME_TOP_ANCHORS, rect=top_rect) is not None:
+        return True
+    for t, x, y in (texts or []):
+        if t.strip() in HOME_BOTTOM_TABS and _in_rect(x, y, bottom_rect):
+            return True
+    return False
 
 
 def ensure_home_page(max_rounds=3) -> bool:
@@ -695,13 +843,87 @@ def check_and_click_continue_watching(texts=None) -> bool:
     return False
 
 
+def _find_progress_unlock_button(texts):
+    """
+    识别领奖进度弹窗里的「解锁第N天畅听 / 立即解锁 第3天畅听」按钮（华为等版本常见变体）。
+    严格排除倒计时/挽留标题（「再看28秒继续解锁」）与负面按钮（「坚持退出 / 放弃」），限定下半屏 y >= 45%。
+    """
+    if not texts:
+        return None
+    joined = " | ".join(t for t, _, _ in texts)
+    if not any(h in joined for h in ("畅听", "再看", "解锁")):
+        return None
+    min_y = int(SCREEN_H * 0.45)
+    for t, x, y in texts:
+        if "解锁" not in t:
+            continue
+        if y < min_y:
+            continue
+        if "秒" in t or "继续解锁" in t or "坚持" in t or "放弃" in t:
+            continue
+        return (t, x, y)
+    return None
+
+
+def _is_ad_landing_page(joined: str) -> bool:
+    """
+    判断是否为 App 内部广告落地页（会员推销页等）。
+    安全前提：当前没有进行中的倒计时（不含「秒后」），且没有「继续观看」挽留按钮。
+    """
+    if not joined:
+        return False
+    if "秒后" in joined or any(kw in joined for kw in CONTINUE_WATCHING_KEYWORDS):
+        return False
+    return any(hint in joined for hint in AD_LANDING_HINTS)
+
+
+def handle_ad_landing_page(texts, desc_prefix="关闭落地页") -> bool:
+    """
+    关闭 App 内广告落地页：
+      1) 无障碍顶部关闭/退出 desc 控件（y < 22%）
+      2) 顶部 OCR 文字/符号（关闭 / × / ✕ / ✖）
+      3) 右上角单个 X/x
+      4) 返回键兜底
+    """
+    top_rect = [0, 0, SCREEN_W, int(SCREEN_H * 0.22)]
+    for desc in ("关闭", "退出"):
+        sel_hit = _selector_find(desc, rect=top_rect, by="desc")
+        if sel_hit:
+            log(f"  ⚠️  广告落地页 → 点击顶部控件[{desc}] @ ({sel_hit['center_x']}, {sel_hit['center_y']})")
+            safe_click(sel_hit["center_x"], sel_hit["center_y"], f"{desc_prefix}(desc:{desc})", sleep_after=1.5)
+            return True
+
+    hit = _find_in_texts(texts, ("关闭", "×", "✕", "✖"), rect=top_rect)
+    if hit:
+        t, x, y = hit
+        log(f"  ⚠️  广告落地页 → 点击顶部 '{t}' @ ({x}, {y})")
+        safe_click(x, y, f"{desc_prefix}({t})", sleep_after=1.5)
+        return True
+
+    top_right_x = [int(SCREEN_W * 0.78), 0, SCREEN_W, int(SCREEN_H * 0.20)]
+    for t, x, y in (texts or []):
+        if t.strip() in ("X", "x") and _in_rect(x, y, top_right_x):
+            log(f"  ⚠️  广告落地页 → 点击右上角 '{t}' @ ({x}, {y})")
+            safe_click(x, y, f"{desc_prefix}(X)", sleep_after=1.5)
+            return True
+
+    log("  广告落地页未识别到关闭按钮，按返回键兜底")
+    try:
+        action.Key.back()
+        time.sleep(1.5)
+        return True
+    except Exception as e:
+        log(f"  返回键关闭落地页异常: {e}")
+    return False
+
+
 def wait_ad_countdown(timeout=AD_COUNTDOWN_TIMEOUT, stats=None):
     """
     等待广告倒计时结束，顶部区域出现"领取成功"。
     返回 (status, pos)：
       - ("ready", (cx, cy))         -> 顶部出现"领取成功"（携带坐标供阶段五直接点击）
       - ("quota_exhausted", None)   -> 检测到当日额度已领完
-      - ("timeout", None)           -> 超时未检测到广告结束
+      - ("timeout", None)           -> 超时或倒计时卡死未检测到广告结束
     """
     log("阶段四：等待广告倒计时结束")
     start_ts = time.time()
@@ -709,6 +931,7 @@ def wait_ad_countdown(timeout=AD_COUNTDOWN_TIMEOUT, stats=None):
     hard_deadline = start_ts + max(timeout, MAX_AD_TIMEOUT)
     checks = 0
     last_sec = -1
+    last_sec_change_ts = start_ts
     consecutive_live_exits = 0
 
     top_reward_rect = [0, 0, SCREEN_W, int(SCREEN_H * 0.25)]
@@ -744,7 +967,26 @@ def wait_ad_countdown(timeout=AD_COUNTDOWN_TIMEOUT, stats=None):
             log("  ⚠️  检测到当日广告额度已领完，准备退出")
             return ("quota_exhausted", None)
 
-        # 3) 直播互动弹窗（先排除短剧挽留弹窗）
+        # 3) 领奖进度弹窗挡住画面（如「解锁第4天畅听」），点击按钮继续
+        unlock_hit = _find_progress_unlock_button(texts)
+        if unlock_hit:
+            ut, ux, uy = unlock_hit
+            log(f"  ⚠️  识别到领奖进度弹窗 → 点击 '{ut}' @ ({ux}, {uy})")
+            if safe_click(ux, uy, f"进度弹窗({ut})", sleep_after=2.0):
+                if stats is not None:
+                    stats["progress_unlocks"] = stats.get("progress_unlocks", 0) + 1
+                last_sec_change_ts = time.time()
+                continue
+
+        # 4) App 内部广告落地页挡住画面（无倒计时且无继续观看时安全关闭）
+        if _is_ad_landing_page(joined):
+            if stats is not None:
+                stats["landing_closed"] = stats.get("landing_closed", 0) + 1
+            if handle_ad_landing_page(texts, desc_prefix="等待阶段-关闭落地页"):
+                last_sec_change_ts = time.time()
+                continue
+
+        # 5) 直播互动弹窗（先排除短剧挽留弹窗）
         if _is_live_prompt(joined):
             log(f"  ⚠️  识别到直播互动弹窗（轮询 {checks} 次）")
             if stats is not None:
@@ -752,7 +994,7 @@ def wait_ad_countdown(timeout=AD_COUNTDOWN_TIMEOUT, stats=None):
             if handle_live_prompt(texts):
                 continue
 
-        # 4) 已在直播间（连续 3 次退出仍卡在直播间时强制切回汽水音乐）
+        # 6) 已在直播间（连续 3 次退出仍卡在直播间时强制切回汽水音乐）
         if any(kw in joined for kw in LIVE_ROOM_HINTS):
             consecutive_live_exits += 1
             log(f"  ⚠️  识别到直播间界面（第 {consecutive_live_exits} 次 / 轮询 {checks} 次）")
@@ -770,7 +1012,7 @@ def wait_ad_countdown(timeout=AD_COUNTDOWN_TIMEOUT, stats=None):
             if handle_live_room(texts):
                 continue
 
-        # 5) 完整解析多位倒计时数字并动态顺延等待窗口（防 45s~60s 长广告中途超时）
+        # 7) 完整解析多位倒计时数字并动态顺延等待窗口；若连续停滞超阈值则提前放弃本轮
         countdown_item = None
         for t, x, y in texts:
             if not _in_rect(x, y, top_countdown_rect):
@@ -784,16 +1026,21 @@ def wait_ad_countdown(timeout=AD_COUNTDOWN_TIMEOUT, stats=None):
             m = re.search(r"(\d+)\s*秒后", countdown_item)
             if m:
                 sec = int(m.group(1))
+                now = time.time()
                 if sec != last_sec:
                     log(f"  广告倒计时中... {countdown_item}")
                     last_sec = sec
-                # 根据剩余秒数平滑延长截止时间（最多不超过 hard_deadline）
-                deadline = min(hard_deadline, max(deadline, time.time() + sec + 15))
-                consecutive_live_exits = 0
+                    last_sec_change_ts = now
+                    deadline = min(hard_deadline, max(deadline, now + sec + 15))
+                    consecutive_live_exits = 0
+                elif COUNTDOWN_STALL_TIMEOUT > 0 and (now - last_sec_change_ts) >= COUNTDOWN_STALL_TIMEOUT:
+                    log(f"  ⚠️  倒计时停滞在 {sec}s 已超 {COUNTDOWN_STALL_TIMEOUT}s，提前结束本轮等待")
+                    return ("timeout", None)
 
-        # 6) 短剧/视频中途挽留或意外暂停 → 点击"继续观看"
+        # 8) 短剧/视频中途挽留或意外暂停 → 点击"继续观看"
         if check_and_click_continue_watching(texts):
             consecutive_live_exits = 0
+            last_sec_change_ts = time.time()
             continue
 
         time.sleep(0.6)
@@ -844,6 +1091,7 @@ def claim_reward(reward_pos=None) -> str:
         step2_hit = (
             _find_in_texts(texts, CLAIM_STEP2_KEYWORDS, rect=step2_rect)
             or _find_in_texts(texts, CLAIM_STEP2_KEYWORDS)
+            or _find_progress_unlock_button(texts)
         )
         if step2_hit:
             kw, kx, ky = step2_hit
@@ -853,6 +1101,11 @@ def claim_reward(reward_pos=None) -> str:
 
         if is_on_home_page(texts):
             log("  ✅ 已回到首页（奖励已自动到账）")
+            return "claimed"
+
+        if _is_ad_landing_page(joined):
+            log("  检测到步骤1后跳入广告落地页 → 安全关闭以防阻塞下一轮")
+            handle_ad_landing_page(texts, desc_prefix="步骤2-关闭落地页")
             return "claimed"
 
         # 若首次尝试后顶部仍卡在"领取成功"，说明步骤 1 未触发有效点击，重试一次
@@ -874,10 +1127,64 @@ def claim_reward(reward_pos=None) -> str:
 
 # ============== 主流程 ==============
 
+def restart_app(stats=None) -> bool:
+    """
+    重启汽水音乐 App 恢复异常状态：
+      1) 先按 Home 键退回桌面打断卡死 Activity
+      2) 若开启 ENABLE_COLD_RESTART_FALLBACK 则尝试 am force-stop（Root/Shizuku 可用）
+      3) 重新拉起包名并清理开屏与弹窗
+    """
+    log("  尝试重启 App 恢复状态")
+    try:
+        try:
+            action.Key.home()
+            time.sleep(0.8)
+        except Exception:
+            pass
+        if ENABLE_COLD_RESTART_FALLBACK:
+            shell_fn = getattr(system, "shell", None)
+            if callable(shell_fn):
+                try:
+                    shell_fn(f"am force-stop {APP_PACKAGE}")
+                    time.sleep(0.8)
+                except Exception:
+                    pass
+        system.open(APP_PACKAGE)
+        if stats is not None:
+            stats["restarts"] = stats.get("restarts", 0) + 1
+        time.sleep(3.5)
+        skip_splash_ad(timeout=4)
+        dismiss_popups(max_rounds=2)
+        return True
+    except Exception as e:
+        log(f"  重启异常: {e}")
+        return False
+
+
+def notify_summary(msg: str):
+    """脚本退出时尝试调用 AScript Toast 提示汇总（不支持时静默忽略）"""
+    if not SHOW_SUMMARY_TOAST:
+        return
+    toast_fn = getattr(system, "toast", None)
+    if callable(toast_fn):
+        try:
+            toast_fn(msg)
+        except Exception:
+            pass
+
+
 def run_ad_loop(stats=None) -> int:
     """核心广告领取循环"""
     if stats is None:
-        stats = {"claimed": 0, "live_prompts": 0, "live_rooms": 0, "hijacks": 0, "restarts": 0}
+        stats = {
+            "claimed": 0,
+            "live_prompts": 0,
+            "live_rooms": 0,
+            "hijacks": 0,
+            "restarts": 0,
+            "progress_unlocks": 0,
+            "landing_closed": 0,
+        }
 
     log("\n" + "#" * 60)
     log("🎯 进入核心广告领取循环")
@@ -916,22 +1223,14 @@ def run_ad_loop(stats=None) -> int:
 
             # 连续失败达到 3 的倍数：重启 App 清理异常状态并重新过开屏/弹窗
             if AUTO_RESTART_APP and idle_count % 3 == 0:
-                log("  尝试重启 App 恢复状态")
-                try:
-                    system.open(APP_PACKAGE)
-                    stats["restarts"] = stats.get("restarts", 0) + 1
-                    time.sleep(3.5)
-                    skip_splash_ad(timeout=4)
-                    dismiss_popups(max_rounds=2)
-                except Exception as e:
-                    log(f"  重启异常: {e}")
+                restart_app(stats=stats)
 
             on_home = ensure_home_page(max_rounds=3)
             if AUTO_CLICK_MIAN:
                 dismiss_popups(max_rounds=1)
                 if on_home or is_on_home_page():
                     log("  已确认处于首页 → 尝试重新点击'免'字进入广告")
-                    click_mian_button()
+                    enter_ad_from_home(verify=True)
                     time.sleep(2.5)
                 else:
                     log("  ⚠️  未确认处于首页，跳过点击'免'字以防误触")
@@ -944,6 +1243,9 @@ def run_ad_loop(stats=None) -> int:
             stats["claimed"] = success_count
             idle_count = 0
             log(f"  ✅ 第 {round_idx} 轮成功，累计 {success_count} 次")
+            if TARGET_CLAIM_COUNT > 0 and success_count >= TARGET_CLAIM_COUNT:
+                log(f"  🎯 已达到目标领取次数 {TARGET_CLAIM_COUNT} 次，安全退出")
+                break
         elif res == "quota_exhausted":
             log("  🎉 今日广告奖励额度已全部领完，体面退出")
             break
@@ -985,9 +1287,20 @@ def ensure_awake():
 def main():
     """脚本入口"""
     start_time = time.time()
-    stats = {"claimed": 0, "live_prompts": 0, "live_rooms": 0, "hijacks": 0, "restarts": 0}
+    stats = {
+        "claimed": 0,
+        "live_prompts": 0,
+        "live_rooms": 0,
+        "hijacks": 0,
+        "restarts": 0,
+        "progress_unlocks": 0,
+        "landing_closed": 0,
+    }
     log("🎵 汽水音乐自动看广告脚本（安卓版）启动")
-    log(f"   包名: {APP_PACKAGE} | OCR引擎: {OCR_ENGINE} | 自动点免字: {AUTO_CLICK_MIAN}")
+    log(
+        f"   包名: {APP_PACKAGE} | OCR引擎: {OCR_ENGINE} | 预设: {MIAN_PRESET} "
+        f"({MIAN_X_RATIO:.3f}, {MIAN_Y_RATIO:.3f}) | 自动点免字: {AUTO_CLICK_MIAN}"
+    )
     try:
         init_regions()
         if OCR_ENGINE in ("paddle", "mlkit"):
@@ -1010,19 +1323,12 @@ def main():
 
         if not ensure_home_page(max_rounds=3):
             log("  未能回到首页，重新启动 App 再试")
-            try:
-                system.open(APP_PACKAGE)
-                stats["restarts"] += 1
-                time.sleep(4)
-                skip_splash_ad(timeout=4)
-                dismiss_popups(max_rounds=2)
-            except Exception as e:
-                log(f"  重启异常: {e}")
+            restart_app(stats=stats)
 
         if AUTO_CLICK_MIAN:
             if is_on_home_page():
                 log("\n自动模式（前置校验通过）：脚本将自动点'免'字进入广告")
-                click_mian_button()
+                enter_ad_from_home(verify=True)
                 time.sleep(3.5)
             else:
                 log("\n⚠️  未检测到首页特征，暂不自动点'免'字，直接进入状态监听轮次")
@@ -1044,12 +1350,15 @@ def main():
     finally:
         elapsed = int(time.time() - start_time)
         mins, secs = divmod(elapsed, 60)
-        log("=" * 60)
-        log(
-            f"✅ 运行统计 | 耗时: {mins}分{secs}秒 | 成功领取: {stats['claimed']} 次 | "
+        summary = (
+            f"运行统计 | 耗时: {mins}分{secs}秒 | 成功领取: {stats['claimed']} 次 | "
+            f"进度解锁: {stats['progress_unlocks']} 次 | 关闭落地页: {stats['landing_closed']} 次 | "
             f"拦截直播弹窗: {stats['live_prompts']} 次 | 退出直播间: {stats['live_rooms']} 次 | "
             f"防劫持拉回: {stats['hijacks']} 次 | App重启: {stats['restarts']} 次"
         )
+        log("=" * 60)
+        log(f"✅ {summary}")
+        notify_summary(f"汽水音乐脚本结束：本次共领取 {stats['claimed']} 次奖励")
         log("脚本退出")
 
 
