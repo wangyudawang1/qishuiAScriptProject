@@ -64,6 +64,23 @@ _DEFAULT_CONFIG = {
 }
 
 
+def _resolve_mian_ratio(presets, preset_name, x_override, y_override):
+    """解析「免」字坐标：手动比例优先，其次取预设；预设名不存在时回退默认坐标并返回警告。"""
+    default_ratio = _DEFAULT_CONFIG["MIAN_PRESETS"]["default_top_right"]
+    preset_warning = None
+    if preset_name in presets:
+        preset_ratio = presets[preset_name]
+    else:
+        preset_ratio = default_ratio
+        preset_warning = (
+            f"MIAN_PRESET={preset_name!r} 不在 MIAN_PRESETS 中，已回退 {default_ratio}；"
+            f"可选预设: {sorted(presets)}"
+        )
+    x_ratio = float(preset_ratio[0]) if x_override is None else float(x_override)
+    y_ratio = float(preset_ratio[1]) if y_override is None else float(y_override)
+    return x_ratio, y_ratio, preset_warning
+
+
 def _load_user_config():
     """加载同目录 config.py，兼容 AScript 包运行与单元测试直接加载两种场景。"""
     cfg_mod = None
@@ -93,12 +110,17 @@ def _load_user_config():
             resolved[key] = default_val
 
     presets = resolved["MIAN_PRESETS"] or _DEFAULT_CONFIG["MIAN_PRESETS"]
-    preset_name = resolved["MIAN_PRESET"]
-    px, py = presets.get(preset_name, (0.937, 0.063))
-    if resolved["MIAN_X_RATIO"] is None:
-        resolved["MIAN_X_RATIO"] = float(px)
-    if resolved["MIAN_Y_RATIO"] is None:
-        resolved["MIAN_Y_RATIO"] = float(py)
+    x_ratio, y_ratio, preset_warning = _resolve_mian_ratio(
+        presets,
+        resolved["MIAN_PRESET"],
+        resolved["MIAN_X_RATIO"],
+        resolved["MIAN_Y_RATIO"],
+    )
+    if preset_warning:
+        # 模块加载阶段 log() 还未定义，直接写 stderr，避免配置写错后静默用默认坐标
+        print(f"[config] {preset_warning}", file=sys.stderr)
+    resolved["MIAN_X_RATIO"] = x_ratio
+    resolved["MIAN_Y_RATIO"] = y_ratio
     return resolved
 
 
