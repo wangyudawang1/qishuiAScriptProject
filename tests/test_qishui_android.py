@@ -628,6 +628,29 @@ class TestQishuiAndroid(unittest.TestCase):
         self.assertIn("huawei_play_side", qishui.MIAN_PRESETS)
         self.assertEqual(qishui.MIAN_PRESETS["huawei_play_side"], (0.790, 0.814))
 
+    def test_resolve_mian_ratio_uses_selected_preset(self):
+        x, y, warn = qishui._resolve_mian_ratio(
+            qishui.MIAN_PRESETS, "huawei_play_side", None, None
+        )
+        self.assertEqual((x, y), (0.790, 0.814))
+        self.assertIsNone(warn)
+
+    def test_resolve_mian_ratio_unknown_preset_warns_and_falls_back(self):
+        # 预设名写错时应回退默认坐标并给出提示，而不是静默使用默认值
+        x, y, warn = qishui._resolve_mian_ratio(
+            qishui.MIAN_PRESETS, "huawei_side", None, None
+        )
+        self.assertEqual((x, y), (0.937, 0.063))
+        self.assertIsNotNone(warn)
+        self.assertIn("huawei_side", warn)
+
+    def test_resolve_mian_ratio_manual_override_wins(self):
+        x, y, warn = qishui._resolve_mian_ratio(
+            qishui.MIAN_PRESETS, "huawei_play_side", 0.5, None
+        )
+        self.assertEqual((x, y), (0.5, 0.814))
+        self.assertIsNone(warn)
+
     def test_is_on_home_page_rejects_ad_copy_false_positives(self):
         # 广告正文中出现"发现更多好物"、"汽水音乐会员"不应被误判为首页
         ad_texts = [
